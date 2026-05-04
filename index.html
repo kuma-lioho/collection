@@ -160,17 +160,17 @@
     <!-- Firebase SDKs -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
-        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
-        // Firebase 配置
+        // Firebase 配置 (已更新為專案 collection-3a574)
         const firebaseConfig = {
-    apiKey: "AIzaSyCBK1WIT7zzhFLIiikGQHQ6dXuKqRPNAho",
-    authDomain: "collection-3a574.firebaseapp.com",
-    projectId: "collection-3a574",
-    storageBucket: "collection-3a574.firebasestorage.app",
-    messagingSenderId: "521071313829",
-    appId: "1:521071313829:web:e708587db68ce7075e1e4c"
+            apiKey: "AIzaSyCBK1WIT7zzhFLIiikGQHQ6dXuKqRPNAho",
+            authDomain: "collection-3a574.firebaseapp.com",
+            projectId: "collection-3a574",
+            storageBucket: "collection-3a574.firebasestorage.app",
+            messagingSenderId: "521071313829",
+            appId: "1:521071313829:web:e708587db68ce7075e1e4c"
         };
 
         // 初始化
@@ -178,7 +178,9 @@
         const auth = getAuth(app);
         const db = getFirestore(app);
         const provider = new GoogleAuthProvider();
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'collection-app';
+        
+        // 使用系統提供的 appId 或預設值
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'collection-app-v2';
 
         // 全域變數
         let currentUser = null;
@@ -201,7 +203,7 @@
             signOut(auth);
         };
 
-        // 監聽登入狀態 (RULE 3)
+        // 監聽登入狀態
         onAuthStateChanged(auth, async (user) => {
             const mainContent = document.getElementById('mainContent');
             const authPrompt = document.getElementById('authPrompt');
@@ -217,7 +219,7 @@
                 addBtn.classList.remove('hidden');
                 userInfo.classList.remove('hidden');
                 
-                document.getElementById('userPhoto').src = user.photoURL;
+                document.getElementById('userPhoto').src = user.photoURL || 'https://via.placeholder.com/150';
                 document.getElementById('userName').textContent = user.displayName;
 
                 setupFirestoreListener(user.uid);
@@ -235,15 +237,15 @@
             }
         });
 
-        // --- Firestore 邏輯 (RULE 1 & 2) ---
+        // --- Firestore 邏輯 ---
 
         function setupFirestoreListener(uid) {
+            // 遵循路徑規範: /artifacts/{appId}/users/{userId}/{collectionName}
             const itemsRef = collection(db, 'artifacts', appId, 'users', uid, 'collections');
             
-            // 使用 onSnapshot 即時更新 (RULE 2: 簡單查詢)
             unsubscribe = onSnapshot(itemsRef, (snapshot) => {
                 collections = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                // 前端排序
+                // 在前端按日期排序（新規則不支援多重排序以避免索引問題）
                 collections.sort((a, b) => new Date(b.date) - new Date(a.date));
                 
                 document.getElementById('loadingState').classList.add('hidden');
@@ -258,7 +260,6 @@
 
         // --- 核心功能 ---
 
-        // 圖片轉 Base64
         function fileToBase64(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
@@ -282,7 +283,6 @@
                 const fileInput = document.getElementById('itemFile');
                 let imageUrl = document.getElementById('itemImageUrl').value;
 
-                // 如果有上傳檔案，轉為 Base64
                 if (fileInput.files && fileInput.files[0]) {
                     imageUrl = await fileToBase64(fileInput.files[0]);
                 }
@@ -291,7 +291,7 @@
                     name: document.getElementById('itemName').value,
                     category: document.getElementById('itemCategory').value.trim() || '未分類',
                     rating: parseInt(document.getElementById('itemRating').value),
-                    imageUrl: imageUrl,
+                    imageUrl: imageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400',
                     description: document.getElementById('itemDescription').value,
                     date: id ? collections.find(c => c.id === id).date : new Date().toISOString()
                 };
@@ -308,7 +308,7 @@
                 closeModal();
             } catch (error) {
                 console.error("Save error", error);
-                showToast("儲存失敗", "error");
+                showToast("儲存失敗: " + error.message, "error");
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = originalBtnText;
@@ -317,17 +317,17 @@
 
         window.deleteItem = async (id) => {
             if (!currentUser) return;
-            if (confirm('確定要從雲端刪除這件收藏嗎？')) {
+            if (confirm('確定要刪除這件收藏嗎？')) {
                 try {
                     await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'collections', id));
-                    showToast('已由雲端移除', 'error');
+                    showToast('已移除', 'error');
                 } catch (error) {
                     showToast('刪除失敗', 'error');
                 }
             }
         };
 
-        // --- UI 渲染 (與之前版本類似，但連接到全域變數) ---
+        // --- UI 渲染 ---
 
         function renderCategories() {
             const container = document.getElementById('categoryFilters');
@@ -372,7 +372,7 @@
             grid.innerHTML = filtered.map(item => `
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group hover:shadow-xl transition-all flex flex-col">
                     <div class="relative h-48 overflow-hidden card-zoom bg-gray-100">
-                        <img src="${item.imageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400'}" 
+                        <img src="${item.imageUrl}" 
                              class="w-full h-full object-cover transition-transform duration-500"
                              onerror="this.src='https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400'">
                         <div class="absolute top-3 right-3 flex gap-1">
@@ -428,7 +428,6 @@
 
         window.closeModal = () => document.getElementById('itemModal').classList.add('hidden');
 
-        // 通用通知
         function showToast(message, type = 'success') {
             const toast = document.getElementById('toast');
             document.getElementById('toastMessage').textContent = message;
