@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的珍藏 - Firebase 雲端版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        body {
+            font-family: 'Noto+Sans+TC', sans-serif;
+            background-color: #f8fafc;
+        }
+        .card-zoom:hover img { transform: scale(1.1); }
+        .modal-overlay {
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+        .loading-spinner {
+            border: 3px solid rgba(0,0,0,.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #4f46e5;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- 導覽列 -->
+    <nav class="bg-white shadow-sm sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16 items-center">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="gem" class="text-indigo-600 w-8 h-8"></i>
+                    <h1 class="text-xl md:text-2xl font-bold text-gray-900">我的珍藏</h1>
+                </div>
+                
+                <div class="flex items-center gap-4">
+                    <div id="userInfo" class="hidden flex items-center gap-2">
+                        <img id="userPhoto" src="" class="w-8 h-8 rounded-full border">
+                        <span id="userName" class="hidden md:inline text-sm font-medium text-gray-700"></span>
+                        <button onclick="handleSignOut()" class="text-xs text-gray-500 hover:text-red-500 underline">登出</button>
+                    </div>
+                    <button id="loginBtn" onclick="handleGoogleLogin()" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-2">
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/pwa_loader/googleg.svg" class="w-4 h-4">
+                        Google 登入
+                    </button>
+                    <button id="addBtn" onclick="openModal()" class="hidden inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md">
+                        <i data-lucide="plus" class="w-5 h-5 mr-1"></i> 新增
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主要內容 -->
+    <main id="mainContent" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 opacity-50 pointer-events-none">
+        
+        <!-- 搜尋與過濾 -->
+        <div class="flex flex-col md:flex-row gap-4 mb-8">
+            <div class="relative flex-1">
+                <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5"></i>
+                <input type="text" id="searchInput" oninput="filterItems()" placeholder="搜尋收藏品..." 
+                    class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none">
+            </div>
+            <div class="flex gap-2 overflow-x-auto pb-2 md:pb-0" id="categoryFilters"></div>
+        </div>
+
+        <!-- 狀態顯示 -->
+        <div id="loadingState" class="flex flex-col items-center justify-center py-20">
+            <div class="loading-spinner"></div>
+            <p class="mt-4 text-gray-500">同步雲端資料中...</p>
+        </div>
+
+        <div id="itemsGrid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"></div>
+
+        <div id="emptyState" class="hidden flex flex-col items-center justify-center py-20 text-gray-500">
+            <i data-lucide="package-open" class="w-20 h-20 mb-4 opacity-20"></i>
+            <p class="text-xl">尚未有任何收藏</p>
+        </div>
+    </main>
+
+    <!-- 登入提示 -->
+    <div id="authPrompt" class="fixed inset-0 flex items-center justify-center z-10">
+        <div class="text-center p-8 bg-white rounded-2xl shadow-xl">
+            <i data-lucide="lock" class="w-16 h-16 mx-auto mb-4 text-gray-300"></i>
+            <h2 class="text-xl font-bold mb-2">請先登入</h2>
+            <p class="text-gray-500 mb-6">登入後即可開始管理您的個人收藏</p>
+            <button onclick="handleGoogleLogin()" class="px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all font-medium">使用 Google 帳號登入</button>
+        </div>
+    </div>
+
+    <!-- 編輯彈窗 -->
+    <div id="itemModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 id="modalTitle" class="text-xl font-bold">新增收藏品</h2>
+                    <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600">
+                        <i data-lucide="x" class="w-6 h-6"></i>
+                    </button>
+                </div>
+                
+                <form id="itemForm" class="space-y-4">
+                    <input type="hidden" id="itemId">
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">名稱 *</label>
+                        <input type="text" id="itemName" required class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">類別</label>
+                            <input type="text" id="itemCategory" placeholder="例如：書籍" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">評分 (1-5)</label>
+                            <input type="number" id="itemRating" min="1" max="5" value="5" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">圖片</label>
+                        <div class="flex flex-col gap-2">
+                            <input type="file" id="itemFile" accept="image/*" class="text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100">
+                            <div class="flex items-center gap-2 py-1">
+                                <span class="text-xs text-gray-400">或輸入 URL</span>
+                                <div class="h-px flex-1 bg-gray-200"></div>
+                            </div>
+                            <input type="url" id="itemImageUrl" placeholder="https://..." class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">備註</label>
+                        <textarea id="itemDescription" rows="2" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none resize-none"></textarea>
+                    </div>
+
+                    <div class="flex gap-3 pt-4">
+                        <button type="button" onclick="closeModal()" class="flex-1 px-4 py-2 border border-gray-300 rounded-lg">取消</button>
+                        <button type="submit" id="submitBtn" class="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-md">儲存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed bottom-8 right-8 transform translate-y-20 opacity-0 transition-all duration-300 z-50 bg-gray-900 text-white px-6 py-3 rounded-xl shadow-lg flex items-center gap-3">
+        <i id="toastIcon" data-lucide="check-circle" class="w-5 h-5"></i>
+        <span id="toastMessage"></span>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+        // Firebase 配置
+        const firebaseConfig = {
+            apiKey: "AIzaSyBNlpNX8I82NjB6fIe_xpP-B8QFZw-UgTM",
+            authDomain: "case-d1e18.firebaseapp.com",
+            projectId: "case-d1e18",
+            storageBucket: "case-d1e18.firebasestorage.app",
+            messagingSenderId: "1002271991855",
+            appId: "1:1002271991855:web:4396393050caca7fc67eda"
+        };
+
+        // 初始化
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const provider = new GoogleAuthProvider();
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'collection-app';
+
+        // 全域變數
+        let currentUser = null;
+        let collections = [];
+        let currentFilter = '全部';
+        let unsubscribe = null;
+
+        // --- 認證邏輯 ---
+
+        window.handleGoogleLogin = async () => {
+            try {
+                await signInWithPopup(auth, provider);
+            } catch (error) {
+                console.error("Login error", error);
+                showToast("登入失敗: " + error.message, "error");
+            }
+        };
+
+        window.handleSignOut = () => {
+            signOut(auth);
+        };
+
+        // 監聽登入狀態 (RULE 3)
+        onAuthStateChanged(auth, async (user) => {
+            const mainContent = document.getElementById('mainContent');
+            const authPrompt = document.getElementById('authPrompt');
+            const loginBtn = document.getElementById('loginBtn');
+            const addBtn = document.getElementById('addBtn');
+            const userInfo = document.getElementById('userInfo');
+
+            if (user) {
+                currentUser = user;
+                mainContent.classList.remove('opacity-50', 'pointer-events-none');
+                authPrompt.classList.add('hidden');
+                loginBtn.classList.add('hidden');
+                addBtn.classList.remove('hidden');
+                userInfo.classList.remove('hidden');
+                
+                document.getElementById('userPhoto').src = user.photoURL;
+                document.getElementById('userName').textContent = user.displayName;
+
+                setupFirestoreListener(user.uid);
+            } else {
+                currentUser = null;
+                mainContent.classList.add('opacity-50', 'pointer-events-none');
+                authPrompt.classList.remove('hidden');
+                loginBtn.classList.remove('hidden');
+                addBtn.classList.add('hidden');
+                userInfo.classList.add('hidden');
+                
+                if (unsubscribe) unsubscribe();
+                collections = [];
+                renderItems();
+            }
+        });
+
+        // --- Firestore 邏輯 (RULE 1 & 2) ---
+
+        function setupFirestoreListener(uid) {
+            const itemsRef = collection(db, 'artifacts', appId, 'users', uid, 'collections');
+            
+            // 使用 onSnapshot 即時更新 (RULE 2: 簡單查詢)
+            unsubscribe = onSnapshot(itemsRef, (snapshot) => {
+                collections = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // 前端排序
+                collections.sort((a, b) => new Date(b.date) - new Date(a.date));
+                
+                document.getElementById('loadingState').classList.add('hidden');
+                document.getElementById('itemsGrid').classList.remove('hidden');
+                renderCategories();
+                renderItems();
+            }, (error) => {
+                console.error("Firestore error", error);
+                showToast("讀取雲端資料失敗", "error");
+            });
+        }
+
+        // --- 核心功能 ---
+
+        // 圖片轉 Base64
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = error => reject(error);
+            });
+        }
+
+        document.getElementById('itemForm').onsubmit = async (e) => {
+            e.preventDefault();
+            if (!currentUser) return;
+
+            const submitBtn = document.getElementById('submitBtn');
+            const originalBtnText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<div class="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin mx-auto"></div>';
+
+            try {
+                const id = document.getElementById('itemId').value;
+                const fileInput = document.getElementById('itemFile');
+                let imageUrl = document.getElementById('itemImageUrl').value;
+
+                // 如果有上傳檔案，轉為 Base64
+                if (fileInput.files && fileInput.files[0]) {
+                    imageUrl = await fileToBase64(fileInput.files[0]);
+                }
+
+                const itemData = {
+                    name: document.getElementById('itemName').value,
+                    category: document.getElementById('itemCategory').value.trim() || '未分類',
+                    rating: parseInt(document.getElementById('itemRating').value),
+                    imageUrl: imageUrl,
+                    description: document.getElementById('itemDescription').value,
+                    date: id ? collections.find(c => c.id === id).date : new Date().toISOString()
+                };
+
+                const userItemsRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'collections');
+
+                if (id) {
+                    await updateDoc(doc(userItemsRef, id), itemData);
+                    showToast('收藏已更新');
+                } else {
+                    await addDoc(userItemsRef, itemData);
+                    showToast('已新增至雲端');
+                }
+                closeModal();
+            } catch (error) {
+                console.error("Save error", error);
+                showToast("儲存失敗", "error");
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalBtnText;
+            }
+        };
+
+        window.deleteItem = async (id) => {
+            if (!currentUser) return;
+            if (confirm('確定要從雲端刪除這件收藏嗎？')) {
+                try {
+                    await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'collections', id));
+                    showToast('已由雲端移除', 'error');
+                } catch (error) {
+                    showToast('刪除失敗', 'error');
+                }
+            }
+        };
+
+        // --- UI 渲染 (與之前版本類似，但連接到全域變數) ---
+
+        function renderCategories() {
+            const container = document.getElementById('categoryFilters');
+            const categories = ['全部', ...new Set(collections.map(i => i.category).filter(c => c))];
+            container.innerHTML = categories.map(cat => `
+                <button onclick="window.setFilter('${cat}')" class="px-4 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
+                    currentFilter === cat ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-gray-600 border hover:border-indigo-300'
+                }">${cat}</button>
+            `).join('');
+        }
+
+        window.setFilter = (cat) => {
+            currentFilter = cat;
+            renderCategories();
+            renderItems();
+        };
+
+        window.filterItems = () => renderItems();
+
+        function renderItems() {
+            const grid = document.getElementById('itemsGrid');
+            const emptyState = document.getElementById('emptyState');
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+
+            let filtered = collections;
+            if (currentFilter !== '全部') filtered = filtered.filter(i => i.category === currentFilter);
+            if (searchTerm) {
+                filtered = filtered.filter(i => 
+                    i.name.toLowerCase().includes(searchTerm) || 
+                    i.category.toLowerCase().includes(searchTerm)
+                );
+            }
+
+            if (filtered.length === 0) {
+                grid.innerHTML = '';
+                if (!document.getElementById('loadingState').classList.contains('hidden')) return;
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            grid.innerHTML = filtered.map(item => `
+                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden group hover:shadow-xl transition-all flex flex-col">
+                    <div class="relative h-48 overflow-hidden card-zoom bg-gray-100">
+                        <img src="${item.imageUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400'}" 
+                             class="w-full h-full object-cover transition-transform duration-500"
+                             onerror="this.src='https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400'">
+                        <div class="absolute top-3 right-3 flex gap-1">
+                            <button onclick="window.openModal('${item.id}')" class="p-2 bg-white/90 backdrop-blur rounded-lg text-indigo-600 opacity-0 group-hover:opacity-100 transition-all">
+                                <i data-lucide="pencil" class="w-4 h-4"></i>
+                            </button>
+                            <button onclick="window.deleteItem('${item.id}')" class="p-2 bg-white/90 backdrop-blur rounded-lg text-red-500 opacity-0 group-hover:opacity-100 transition-all">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                        <span class="absolute bottom-3 left-3 px-2 py-1 bg-black/40 backdrop-blur text-white text-[10px] rounded-md">${item.category}</span>
+                    </div>
+                    <div class="p-5 flex-1 flex flex-col">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-bold text-gray-900 line-clamp-1">${item.name}</h3>
+                            <div class="flex items-center text-amber-500 shrink-0 ml-2">
+                                <i data-lucide="star" class="w-3 h-3 fill-current"></i>
+                                <span class="text-xs font-semibold ml-1">${item.rating}</span>
+                            </div>
+                        </div>
+                        <p class="text-gray-500 text-xs line-clamp-2 mb-4 flex-1">${item.description || '...'}</p>
+                        <div class="text-[10px] text-gray-400 mt-auto pt-2 border-t border-gray-50">
+                            ${new Date(item.date).toLocaleDateString()}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        // --- 視窗管理 ---
+
+        window.openModal = (editId = null) => {
+            const modal = document.getElementById('itemModal');
+            const form = document.getElementById('itemForm');
+            form.reset();
+            document.getElementById('itemId').value = '';
+            document.getElementById('modalTitle').textContent = editId ? '編輯收藏' : '新增收藏品';
+
+            if (editId) {
+                const item = collections.find(c => c.id === editId);
+                if (item) {
+                    document.getElementById('itemId').value = item.id;
+                    document.getElementById('itemName').value = item.name;
+                    document.getElementById('itemCategory').value = item.category;
+                    document.getElementById('itemRating').value = item.rating;
+                    document.getElementById('itemImageUrl').value = item.imageUrl.startsWith('data:image') ? '' : item.imageUrl;
+                    document.getElementById('itemDescription').value = item.description;
+                }
+            }
+            modal.classList.remove('hidden');
+        };
+
+        window.closeModal = () => document.getElementById('itemModal').classList.add('hidden');
+
+        // 通用通知
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMessage').textContent = message;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
+        }
+
+        lucide.createIcons();
+    </script>
+</body>
+</html>
